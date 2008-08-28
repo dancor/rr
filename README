@@ -1,0 +1,2 @@
+- add script to create postgres tables
+- come up with syncing plan (just table sync?)
