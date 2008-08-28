@@ -1,0 +1,3 @@
+#!/bin/sh
+echo 'create database me_log;' | psql template1
+echo 'create table task_log (task_name varchar(64), username varchar(32), actually_did bool, comment varchar(255), did_time int);' | psql me_log

@@ -11,6 +11,8 @@ import qualified Data.Maybe as Mby
 import qualified Data.Set as Set
 import qualified Database.HDBC as DH
 import qualified Database.HDBC.PostgreSQL as DHP
+import Database.HDBC
+import Database.HDBC.PostgreSQL
 import qualified System.Directory as SD
 import qualified System.Environment as Env
 import qualified System.IO as SIO
@@ -18,7 +20,7 @@ import qualified System.Time as Time
 import qualified Text.Printf as TP
 import Util
 
-cPS = DHP.connectPostgreSQL "host=dzl.no-ip.org dbname=me_log user=postgres password=w@f0l3r|aPc"
+cPS = handleSqlError $ connectPostgreSQL "dbname=me_log"
 
 recordTask :: String -> String -> Bool -> String -> IO ()
 recordTask taskName username actuallyDid comment = do
@@ -68,10 +70,10 @@ type IntvlInfo = Map.Map String Int
 rcName = ".rrrc"
 dayTime = 24 * 60 * 60
 intvlInfos = Map.fromList [
-  ("Daily", dayTime),
-  ("Weekly", dayTime * 7),
-  ("Monthly", dayTime * 30),
-  ("Yearly", dayTime * 365)]
+  ("daily", dayTime),
+  ("weekly", dayTime * 7),
+  ("monthly", dayTime * 30),
+  ("yearly", dayTime * 365)]
 
 subLBreak :: Eq a => [a] -> [a] -> Maybe ([a], [a])
 l `subLBreak` s =
