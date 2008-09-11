@@ -1,5 +1,5 @@
--- Allow me to track / be reminded of things I want to do regularly
---  (daily, weekly)
+-- Allow me to track / be reminded of things I want to do regularly 
+-- (daily, weekly)
 
 module Main where
 
@@ -11,12 +11,12 @@ import Data.Time
 import Data.Time.Clock.POSIX
 import Database.HDBC
 import Database.HDBC.PostgreSQL
+import FUtil
 import System.Console.GetOpt
 import System.Directory
 import System.Environment
 import System.IO
 import Text.Printf
-import Util
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 
@@ -188,6 +188,7 @@ showRecent opts = do
   putStr . unlines $ map (\ (task, time) -> 
     show (utcToLocalTime tz time) ++ "\t" ++ task) dones
 
+showTasks :: Options -> IO ()
 showTasks opts = do
   nowTime <- getTimeInt
   homeDir <- getHomeDirectory
