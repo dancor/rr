@@ -29,6 +29,7 @@ data Options = Options {
   optGroupView :: Bool
   }
 
+defaultOptions :: Options
 defaultOptions = Options {
   optKillLast = False,
   optListRecent = 0,
@@ -38,6 +39,7 @@ defaultOptions = Options {
   optGroupView = False
   }
 
+options :: [OptDescr (Options -> Options)]
 options = [
   Option "l" ["list-recent"] 
     (OptArg (\ n o -> o {optListRecent = read $ fromMaybe "5" n}) "N")
@@ -56,8 +58,10 @@ options = [
     "show group view of task list"
   ]
 
+cPS :: IO Connection
 cPS = handleSqlError $ connectPostgreSQL "dbname=me_log"
 
+getTimeInt :: IO Integer
 getTimeInt = fmap floor getPOSIXTime
 
 recordTask :: String -> String -> Bool -> String -> IO ()
@@ -128,8 +132,11 @@ getTaskRecentTime username taskName = do
 
 type IntvlInfo = Map.Map String Int
 
+rcName :: [Char]
 rcName = ".rrrc"
+dayTime :: Integer
 dayTime = 24 * 60 * 60
+intvlInfos :: Map.Map [Char] Integer
 intvlInfos = Map.fromList [
   ("daily", dayTime),
   ("weekly", dayTime * 7),
@@ -165,6 +172,7 @@ parseRc ls = snd $ foldr parseLine (Nothing, Map.empty) $ reverse ls where
         (Map.singleton name mbyDesc) rc) where
           (name, mbyDesc) = l `subLBreakOrL` " - "
 
+toDay :: Integer -> Maybe Integer -> [Char]
 toDay nowTime Nothing = "never!"
 toDay nowTime (Just x) = show $ (nowTime - x) `div` dayTime
 
@@ -177,11 +185,14 @@ mbyCompare f Nothing y = LT
 mbyCompare f x Nothing = GT
 mbyCompare f (Just x) (Just y) = f x y
 
+showMN :: (Text.Printf.PrintfArg t) => Maybe t -> [Char]
 showMN Nothing = "!"
 showMN (Just p) = printf "%.1f" p
 
+showTime :: UTCTime -> DiffTime -> TimeOfDay
 showTime (UTCTime utctDay utctDayTime) = timeToTimeOfDay
 
+showRecent :: Options -> IO ()
 showRecent opts = do
   dones <- getLastDone (optUsername opts) (optListRecent opts)
   tz <- getCurrentTimeZone
