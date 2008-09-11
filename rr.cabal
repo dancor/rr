@@ -5,7 +5,7 @@ license-file:   LICENSE
 author:         Daniel Corson
 synopsis:       repetative-task reminders
 build-type:     Simple
-build-depends: base, time, HDBC, HDBC-postgresql, FUtil, directory, containers
+build-depends: FUtil, HDBC, HDBC-postgresql, base, containers, directory, time
 
 executable:     rr
 main-is:        Main.hs
