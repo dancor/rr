@@ -7,19 +7,21 @@ import Control.Exception
 import Control.Monad
 import Data.List
 import Data.Maybe
+import Data.Time
+import Data.Time.Clock.POSIX
 import Database.HDBC
 import Database.HDBC.PostgreSQL
 import System.Console.GetOpt
 import System.Directory
 import System.Environment
 import System.IO
-import System.Time
 import Text.Printf
 import Util
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 
 data Options = Options {
+  optKillLast :: Bool,
   optListRecent :: Int,
   optActuallyDid :: Bool,
   optComment :: String,
@@ -28,6 +30,7 @@ data Options = Options {
   }
 
 defaultOptions = Options {
+  optKillLast = False,
   optListRecent = 0,
   optActuallyDid = True,
   optComment = "",
@@ -39,6 +42,9 @@ options = [
   Option "l" ["list-recent"] 
     (OptArg (\ n o -> o {optListRecent = read $ fromMaybe "5" n}) "N")
     "list last N (default 5) records",
+  Option "k" ["kill-last"] 
+    (NoArg (\ o -> o {optKillLast = True}))
+    "kill last record for the task",
   Option "n" ["did-not-do"] 
     (NoArg (\ o -> o {optActuallyDid = False}))
     "mark as not-actually-completed when silencing reminder",
@@ -52,9 +58,11 @@ options = [
 
 cPS = handleSqlError $ connectPostgreSQL "dbname=me_log"
 
+getTimeInt = fmap floor getPOSIXTime
+
 recordTask :: String -> String -> Bool -> String -> IO ()
-recordTask taskName username actuallyDid comment = do
-  TOD didTime _ <- getClockTime
+recordTask username taskName actuallyDid comment = do
+  didTime <- getTimeInt
   conn <- cPS
   ret <- withTransaction conn (\ conn -> do
     run conn 
@@ -65,11 +73,24 @@ recordTask taskName username actuallyDid comment = do
     )
   disconnect conn
 
+unrecordTask :: String -> String -> IO ()
+unrecordTask username taskName = do
+  timeMb <- getTaskRecentTime username taskName
+  when (isJust timeMb) $ do
+    conn <- cPS
+    ret <- withTransaction conn (\ conn -> do
+      run conn 
+        "DELETE FROM task_log WHERE username = ? AND task_name = ? AND \
+        \did_time = ?"
+        [toSql username, toSql taskName, toSql $ fromJust timeMb]
+      )
+    disconnect conn
+
 -- find all tasks that haven't been done in the current time block nor
 -- too recently
-getDoneTasks :: String -> Integer -> Integer -> IO (Set.Set String)
-getDoneTasks username timeBlockSize tooRecentDelta = do
-  TOD curTime _ <- getClockTime
+getTodoTasks :: String -> Integer -> Integer -> IO (Set.Set String)
+getTodoTasks username timeBlockSize tooRecentDelta = do
+  curTime <- getTimeInt
   let
     timeBlockStart = curTime - curTime `mod` timeBlockSize
     -- things done after this time don't need to be repeated yet
@@ -84,7 +105,17 @@ getDoneTasks username timeBlockSize tooRecentDelta = do
     )
   return $ Set.fromList $ map (fromSql . head) ret
 
---getTaskRecentTime :: String -> String -> IO (Maybe Int)
+getLastDone :: String -> Int -> IO [(String, UTCTime)]
+getLastDone username n = do
+  conn <- cPS
+  ret <- withTransaction conn (\ conn -> do
+    quickQuery conn 
+      "SELECT task_name, did_time FROM task_log WHERE username = ? ORDER BY did_time DESC LIMIT ?"
+      [toSql username, toSql n]
+    )
+  return $ map (\ x -> (fromSql (x !! 0), posixSecondsToUTCTime $
+    fromIntegral (fromSql (x !! 1) :: Int))) ret
+
 getTaskRecentTime :: String -> String -> IO (Maybe Integer)
 getTaskRecentTime username taskName = do
   conn <- cPS
@@ -149,8 +180,16 @@ mbyCompare f (Just x) (Just y) = f x y
 showMN Nothing = "!"
 showMN (Just p) = printf "%.1f" p
 
+showTime (UTCTime utctDay utctDayTime) = timeToTimeOfDay
+
+showRecent opts = do
+  dones <- getLastDone (optUsername opts) (optListRecent opts)
+  tz <- getCurrentTimeZone
+  putStr . unlines $ map (\ (task, time) -> 
+    show (utcToLocalTime tz time) ++ "\t" ++ task) dones
+
 showTasks opts = do
-  TOD nowTime _ <- getClockTime
+  nowTime <- getTimeInt
   homeDir <- getHomeDirectory
   c <- openFile (homeDir ++ "/" ++ rcName) ReadMode >>= hGetContents
   let
@@ -162,7 +201,7 @@ showTasks opts = do
     rc = Map.mapWithKey (\h v -> (freqHeaderToSecs h, v)) $
       parseRc $ lines c
   intvlsHeadersItemssTimess <- mapM (\ (adverb, (intvl, allTasksMap)) -> do
-      t <- getDoneTasks (optUsername opts) intvl (intvl `div` 2)
+      t <- getTodoTasks (optUsername opts) intvl (intvl `div` 2)
       let
         tasks = Map.toList $ foldr Map.delete allTasksMap (Set.toList t)
         (taskNames, _) = unzip tasks
@@ -207,7 +246,9 @@ main = do
     doErrs errs = error $ concat errs ++ usageInfo usage options
   unless (null errs) $ doErrs errs
   case tasks of
-    [] -> showTasks opts
-    [task] -> recordTask task 
-      (optUsername opts) (optActuallyDid opts) (optComment opts)
+    [] -> if (optListRecent opts > 0) then showRecent opts else showTasks opts
+    [task] -> if optKillLast opts
+      then unrecordTask (optUsername opts) task
+      else recordTask (optUsername opts) task 
+        (optActuallyDid opts) (optComment opts)
     _ -> doErrs []
