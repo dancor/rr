@@ -211,7 +211,7 @@ showTasks opts = do
             )
           ) tasks
       times <- mapM (getTaskRecentTime (optUsername opts)) taskNames
-      return (intvl, adverb ++ " Tasks:", taskLines, times)
+      return (intvl, adverb ++ " tasks:", taskLines, times)
     ) $ Map.toList rc
   if optGroupView opts
     then do
