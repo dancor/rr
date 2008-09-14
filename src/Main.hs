@@ -17,6 +17,7 @@ import System.Directory
 import System.Environment
 import System.IO
 import Text.Printf
+import qualified HSH
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 
@@ -26,6 +27,7 @@ data Options = Options {
   optActuallyDid :: Bool,
   optComment :: String,
   optUsername :: String,
+  optRun :: Bool,
   optGroupView :: Bool
   }
 
@@ -36,6 +38,7 @@ defaultOptions = Options {
   optActuallyDid = True,
   optComment = "",
   optUsername = "",
+  optRun = False,
   optGroupView = False
   }
 
@@ -53,6 +56,9 @@ options = [
   Option "c" ["comment"] 
     (ReqArg (\ c o -> o {optComment = c}) "COMMENT")
     "record comment along with silencing reminder",
+  Option "r" ["run"]
+    (NoArg (\ o -> o {optRun = True}))
+    "run a runnable task in addition to marking",
   Option "g" ["group-view"] 
     (NoArg (\ o -> o {optGroupView = True}))
     "show group view of task list"
@@ -172,9 +178,10 @@ parseRc ls = snd $ foldr parseLine (Nothing, Map.empty) $ reverse ls where
         (Map.singleton name mbyDesc) rc) where
           (name, mbyDesc) = l `subLBreakOrL` " - "
 
-toDay :: Integer -> Maybe Integer -> [Char]
-toDay nowTime Nothing = "never!"
-toDay nowTime (Just x) = show $ (nowTime - x) `div` dayTime
+toDayDiffStr :: Integer -> Maybe Integer -> [Char]
+toDayDiffStr nowTime Nothing = "never!"
+toDayDiffStr nowTime (Just x) = printf "%.1f"
+  ((realToFrac (nowTime - x)) / (realToFrac dayTime) :: Float)
 
 divF :: Integer -> Integer -> Float
 divF a b = (fromIntegral a) / (fromIntegral b)
@@ -199,19 +206,28 @@ showRecent opts = do
   putStr . unlines $ map (\ (task, time) -> 
     show (utcToLocalTime tz time) ++ "\t" ++ task) dones
 
-showTasks :: Options -> IO ()
-showTasks opts = do
-  nowTime <- getTimeInt
+rrrcTaskTree = do
   homeDir <- getHomeDirectory
-  c <- openFile (homeDir ++ "/" ++ rcName) ReadMode >>= hGetContents
+  c <- readFile (homeDir ++ "/" ++ rcName)
   let
     freqHeaderToSecs h = let
       (timesPerStr, intvlStr) = break (== '/') h
       (timesPer, intvlStr') =
         if null intvlStr then (1, h) else (read timesPerStr, tail intvlStr)
       in (fromJust $ Map.lookup intvlStr' intvlInfos) `div` timesPer
-    rc = Map.mapWithKey (\h v -> (freqHeaderToSecs h, v)) $
-      parseRc $ lines c
+  return . Map.toList .
+    Map.mapWithKey (\ h v -> (freqHeaderToSecs h, v)) . parseRc $ lines c
+
+rrrcTasks = do
+  rc <- rrrcTaskTree
+  return . Map.unions $ map (\ (_, (_, allTasksMap)) -> allTasksMap) rc
+
+showTasks :: Options -> IO ()
+showTasks opts = do
+  nowTime <- getTimeInt
+  homeDir <- getHomeDirectory
+  c <- openFile (homeDir ++ "/" ++ rcName) ReadMode >>= hGetContents
+  rc <- rrrcTaskTree
   intvlsHeadersItemssTimess <- mapM (\ (adverb, (intvl, allTasksMap)) -> do
       t <- getTodoTasks (optUsername opts) intvl (intvl `div` 2)
       let
@@ -224,14 +240,14 @@ showTasks opts = do
           ) tasks
       times <- mapM (getTaskRecentTime (optUsername opts)) taskNames
       return (intvl, adverb ++ " tasks:", taskLines, times)
-    ) $ Map.toList rc
+    ) rc
   if optGroupView opts
     then do
       let (_, headers, itemss, timess) = unzip4 intvlsHeadersItemssTimess
       putStrLn $ interlines $
         zipWith3 (\ h is ds -> interlines $ [h] ++ 
           (zipWith (\ a b -> a ++ "  " ++ b) is $
-            map (toDay nowTime) ds))
+            map (toDayDiffStr nowTime) ds))
         headers (spaceBlocks $ map (map ("- " ++)) itemss) timess
     else do
       let
@@ -261,6 +277,16 @@ main = do
     [] -> if (optListRecent opts > 0) then showRecent opts else showTasks opts
     [task] -> if optKillLast opts
       then unrecordTask (optUsername opts) task
-      else recordTask (optUsername opts) task 
-        (optActuallyDid opts) (optComment opts)
+      else do
+        rc <- rrrcTasks
+        case Map.lookup task rc of
+          Just desc -> (if optRun opts
+            then case breakOnSubl "- " $ fromMaybe "" desc of
+              Just (_, cmd) ->
+                let c:a = breaks (== ' ') cmd in HSH.runIO (c, a)
+              Nothing -> error $ "task has no command associated: " ++ task
+            else return ()) >>
+            recordTask (optUsername opts) task (optActuallyDid opts)
+              (optComment opts)
+          Nothing -> doErrs ["task is not in your ~/.rrrc: " ++ task ++ "\n"]
     _ -> doErrs []
