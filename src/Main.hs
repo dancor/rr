@@ -38,7 +38,7 @@ defaultOptions = Options {
   optActuallyDid = True,
   optComment = "",
   optUsername = "",
-  optRun = False,
+  optRun = True,
   optGroupView = False
   }
 
@@ -56,9 +56,9 @@ options = [
   Option "c" ["comment"] 
     (ReqArg (\ c o -> o {optComment = c}) "COMMENT")
     "record comment along with silencing reminder",
-  Option "r" ["run"]
-    (NoArg (\ o -> o {optRun = True}))
-    "run a runnable task in addition to marking",
+  Option "m" ["just-mark"]
+    (NoArg (\ o -> o {optRun = False}))
+    "if task is runnable, still just mark it instead of also running it",
   Option "g" ["group-view"] 
     (NoArg (\ o -> o {optGroupView = True}))
     "show group view of task list"
@@ -264,6 +264,13 @@ showTasks opts = do
         ls = zipWith (\ x y -> x ++ "  " ++ y) (spaceBlock pctsS) items
       putStrLn $ interlines ls
 
+globsOrNot :: [String] -> IO [String]
+globsOrNot = fmap concat . mapM (\ arg -> do
+  gs <- HSH.glob arg
+  return $ case gs of
+    [] -> [arg]
+    gs -> gs)
+
 main :: IO ()
 main = do
   args <- getArgs
@@ -283,8 +290,10 @@ main = do
           Just desc -> (if optRun opts
             then case breakOnSubl "- " $ fromMaybe "" desc of
               Just (_, cmd) ->
-                let c:a = breaks (== ' ') cmd in HSH.runIO (c, a)
-              Nothing -> error $ "task has no command associated: " ++ task
+                let c:a = breaks (== ' ') cmd in do
+                  gs <- globsOrNot a
+                  HSH.runIO (c, gs)
+              Nothing -> return ()
             else return ()) >>
             recordTask (optUsername opts) task (optActuallyDid opts)
               (optComment opts)
