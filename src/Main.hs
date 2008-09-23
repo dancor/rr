@@ -7,6 +7,7 @@ import Control.Exception
 import Control.Monad
 import Data.List
 import Data.Maybe
+import Data.Ratio
 import Data.Time
 import Data.Time.Clock.POSIX
 import Database.HDBC
@@ -28,7 +29,8 @@ data Options = Options {
   optComment :: String,
   optUsername :: String,
   optRun :: Bool,
-  optGroupView :: Bool
+  optGroupView :: Bool,
+  optIntvlFracToShow :: Rational
   }
 
 defaultOptions :: Options
@@ -39,7 +41,8 @@ defaultOptions = Options {
   optComment = "",
   optUsername = "",
   optRun = True,
-  optGroupView = False
+  optGroupView = False,
+  optIntvlFracToShow = 0.5
   }
 
 options :: [OptDescr (Options -> Options)]
@@ -61,8 +64,17 @@ options = [
     "if task is runnable, still just mark it instead of also running it",
   Option "g" ["group-view"] 
     (NoArg (\ o -> o {optGroupView = True}))
-    "show group view of task list"
+    "show group view of task list",
+  Option "f" ["intvl-frac-to-show"]
+    (ReqArg (\ f o -> o {optIntvlFracToShow = readDecRat f}) "FRAC")
+    "show tasks undone in the past f * do-interval (default 0.5)"
   ]
+
+readDecRat :: String -> Rational
+readDecRat s = case breakMb (== '.') s of
+  Just (i, r) -> let rInt = read r
+    in fromIntegral (read i) + rInt % 10 ^ length (show rInt)
+  Nothing -> fromIntegral $ read s
 
 cPS :: IO Connection
 cPS = handleSqlError $ connectPostgreSQL "dbname=me_log"
@@ -96,24 +108,19 @@ unrecordTask username taskName = do
       )
     disconnect conn
 
--- find all tasks that haven't been done in the current time block nor
--- too recently
-getTodoTasks :: String -> Integer -> Integer -> IO (Set.Set String)
-getTodoTasks username timeBlockSize tooRecentDelta = do
+-- find all tasks that have been done recently
+getDoneTasks :: String -> Integer -> IO (Set.Set String)
+getDoneTasks username recentDelta = do
   curTime <- getTimeInt
-  let
-    timeBlockStart = curTime - curTime `mod` timeBlockSize
-    -- things done after this time don't need to be repeated yet
-    timeCutoff = min timeBlockStart (curTime - tooRecentDelta)
   conn <- cPS
   ret <- withTransaction conn (\ conn -> do
     quickQuery conn 
       -- grab things that _have_ been done
       "SELECT DISTINCT(task_name) FROM task_log WHERE username = ? AND \
       \did_time >= ?"
-      [toSql username, toSql timeCutoff]
+      [toSql username, toSql $ curTime - recentDelta]
     )
-  return $ Set.fromList $ map (fromSql . head) ret
+  return . Set.fromList $ map (fromSql . head) ret
 
 getLastDone :: String -> Int -> IO [(String, UTCTime)]
 getLastDone username n = do
@@ -229,17 +236,18 @@ showTasks opts = do
   c <- openFile (homeDir ++ "/" ++ rcName) ReadMode >>= hGetContents
   rc <- rrrcTaskTree
   intvlsHeadersItemssTimess <- mapM (\ (adverb, (intvl, allTasksMap)) -> do
-      t <- getTodoTasks (optUsername opts) intvl (intvl `div` 2)
-      let
-        tasks = Map.toList $ foldr Map.delete allTasksMap (Set.toList t)
-        (taskNames, _) = unzip tasks
-        taskLines = map (\ (name, mbyDesc) -> name ++ (case mbyDesc of
-              Nothing -> ""
-              Just desc -> " - " ++ desc
-            )
-          ) tasks
-      times <- mapM (getTaskRecentTime (optUsername opts)) taskNames
-      return (intvl, adverb ++ " tasks:", taskLines, times)
+    t <- getDoneTasks (optUsername opts) . floor $
+      optIntvlFracToShow opts * fromIntegral intvl
+    let
+      tasks = Map.toList . foldr Map.delete allTasksMap $ Set.toList t
+      (taskNames, _) = unzip tasks
+      taskLines = map (\ (name, mbyDesc) -> name ++ (case mbyDesc of
+            Nothing -> ""
+            Just desc -> " - " ++ desc
+          )
+        ) tasks
+    times <- mapM (getTaskRecentTime (optUsername opts)) taskNames
+    return (intvl, adverb ++ " tasks:", taskLines, times)
     ) rc
   if optGroupView opts
     then do
