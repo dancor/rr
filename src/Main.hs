@@ -271,31 +271,36 @@ globsOrNot = fmap concat . mapM (\ arg -> do
     [] -> [arg]
     gs -> gs)
 
+doErrs :: [[Char]] -> b
+doErrs errs = let
+  usage = "usage: ./rr [options] [task]"
+  in error $ concat errs ++ usageInfo usage options
+
+doTask :: Options -> String -> IO ()
+doTask opts task = if optKillLast opts
+  then unrecordTask (optUsername opts) task
+  else do
+    rc <- rrrcTasks
+    case Map.lookup task rc of
+      Just desc -> (if optRun opts
+        then case breakOnSubl "- " $ fromMaybe "" desc of
+          Just (_, cmd) ->
+            let c:a = breaks (== ' ') cmd in do
+              gs <- globsOrNot a
+              HSH.runIO (c, gs)
+          Nothing -> return ()
+        else return ()) >>
+        recordTask (optUsername opts) task (optActuallyDid opts)
+          (optComment opts)
+      Nothing -> doErrs ["task is not in your ~/.rrrc: " ++ task ++ "\n"]
+
 main :: IO ()
 main = do
   args <- getArgs
   let
     (optsPre, tasks, errs) = getOpt Permute options args
     opts = foldl (flip id) defaultOptions optsPre
-    usage = "usage: ./rr [options] [task]"
-    doErrs errs = error $ concat errs ++ usageInfo usage options
   unless (null errs) $ doErrs errs
-  case tasks of
-    [] -> if (optListRecent opts > 0) then showRecent opts else showTasks opts
-    [task] -> if optKillLast opts
-      then unrecordTask (optUsername opts) task
-      else do
-        rc <- rrrcTasks
-        case Map.lookup task rc of
-          Just desc -> (if optRun opts
-            then case breakOnSubl "- " $ fromMaybe "" desc of
-              Just (_, cmd) ->
-                let c:a = breaks (== ' ') cmd in do
-                  gs <- globsOrNot a
-                  HSH.runIO (c, gs)
-              Nothing -> return ()
-            else return ()) >>
-            recordTask (optUsername opts) task (optActuallyDid opts)
-              (optComment opts)
-          Nothing -> doErrs ["task is not in your ~/.rrrc: " ++ task ++ "\n"]
-    _ -> doErrs []
+  if null tasks
+    then if optListRecent opts > 0 then showRecent opts else showTasks opts
+    else mapM_ (doTask opts) tasks
