@@ -281,7 +281,7 @@ globsOrNot = fmap concat . mapM (\ arg -> do
 
 doErrs :: [[Char]] -> b
 doErrs errs = let
-  usage = "usage: ./rr [options] [task]"
+  usage = "usage: rr [options] [task]"
   in error $ concat errs ++ usageInfo usage options
 
 doTask :: Options -> String -> IO ()
