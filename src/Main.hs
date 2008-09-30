@@ -156,6 +156,8 @@ intvlInfos = Map.fromList [
   ("monthly", dayTime * 30),
   ("yearly", dayTime * 365)]
 
+-- FIXME: surely have something in FUtil?
+
 subLBreak :: Eq a => [a] -> [a] -> Maybe ([a], [a])
 l `subLBreak` s =
   let
@@ -284,13 +286,18 @@ doErrs errs = let
   usage = "usage: rr [options] [task]"
   in error $ concat errs ++ usageInfo usage options
 
+--lookupPrefix :: k -> Map.Map k v -> [v]
+lookupPrefix k m = case Map.lookup k m of
+  Just v -> [(k, v)]
+  Nothing -> filter ((k `isPrefixOf`) . fst) $ Map.assocs m
+
 doTask :: Options -> String -> IO ()
 doTask opts task = if optKillLast opts
   then unrecordTask (optUsername opts) task
   else do
     rc <- rrrcTasks
-    case Map.lookup task rc of
-      Just desc -> (if optRun opts
+    case lookupPrefix task rc of
+      [(taskFull, desc)] -> (if optRun opts
         then case breakOnSubl "- " $ fromMaybe "" desc of
           Just (_, cmd) ->
             let c:a = breaks (== ' ') cmd in do
@@ -298,9 +305,11 @@ doTask opts task = if optKillLast opts
               HSH.runIO (c, gs)
           Nothing -> return ()
         else return ()) >>
-        recordTask (optUsername opts) task (optActuallyDid opts)
+        recordTask (optUsername opts) taskFull (optActuallyDid opts)
           (optComment opts)
-      Nothing -> doErrs ["task is not in your ~/.rrrc: " ++ task ++ "\n"]
+      [] -> doErrs ["task is not in your ~/.rrrc: " ++ task ++ "\n"]
+      taskDescs -> doErrs ["task prefix is ambiguous: " ++ task ++ ": " ++ 
+        intercalate " " (map fst taskDescs) ++ "\n"]
 
 main :: IO ()
 main = do
