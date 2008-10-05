@@ -18,9 +18,9 @@ import System.Directory
 import System.Environment
 import System.IO
 import Text.Printf
-import qualified HSH
 import qualified Data.Map as Map
 import qualified Data.Set as Set
+import qualified HSH
 
 data Options = Options {
   optKillLast :: Bool,
@@ -320,4 +320,4 @@ main = do
   unless (null errs) $ doErrs errs
   if null tasks
     then if optListRecent opts > 0 then showRecent opts else showTasks opts
-    else mapM_ (doTask opts) tasks
+    else mapM_ (doTask opts) tasks >> showTasks opts
