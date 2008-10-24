@@ -1,4 +1,4 @@
--- Allow me to track / be reminded of things I want to do regularly 
+-- Allow me to track / be reminded of things I want to do regularly
 -- (daily, weekly)
 
 module Main where
@@ -47,22 +47,22 @@ defaultOptions = Options {
 
 options :: [OptDescr (Options -> Options)]
 options = [
-  Option "l" ["list-recent"] 
+  Option "l" ["list-recent"]
     (OptArg (\ n o -> o {optListRecent = read $ fromMaybe "5" n}) "N")
     "list last N (default 5) records",
-  Option "k" ["kill-last"] 
+  Option "k" ["kill-last"]
     (NoArg (\ o -> o {optKillLast = True}))
     "kill last record for the task",
-  Option "n" ["did-not-do"] 
+  Option "n" ["did-not-do"]
     (NoArg (\ o -> o {optActuallyDid = False}))
     "mark as not-actually-completed when silencing reminder",
-  Option "c" ["comment"] 
+  Option "c" ["comment"]
     (ReqArg (\ c o -> o {optComment = c}) "COMMENT")
     "record comment along with silencing reminder",
   Option "m" ["just-mark"]
     (NoArg (\ o -> o {optRun = False}))
     "if task is runnable, still just mark it instead of also running it",
-  Option "g" ["group-view"] 
+  Option "g" ["group-view"]
     (NoArg (\ o -> o {optGroupView = True}))
     "show group view of task list",
   Option "f" ["intvl-frac-to-show"]
@@ -87,10 +87,10 @@ recordTask username taskName actuallyDid comment = do
   didTime <- getTimeInt
   conn <- cPS
   ret <- withTransaction conn (\ conn -> do
-    run conn 
+    run conn
       "INSERT INTO task_log (task_name, username, actually_did, comment, \
       \did_time) VALUES (?, ?, ?, ?, ?)"
-      [toSql taskName, toSql username, toSql actuallyDid, 
+      [toSql taskName, toSql username, toSql actuallyDid,
       toSql comment, toSql didTime]
     )
   disconnect conn
@@ -101,7 +101,7 @@ unrecordTask username taskName = do
   when (isJust timeMb) $ do
     conn <- cPS
     ret <- withTransaction conn (\ conn -> do
-      run conn 
+      run conn
         "DELETE FROM task_log WHERE username = ? AND task_name = ? AND \
         \did_time = ?"
         [toSql username, toSql taskName, toSql $ fromJust timeMb]
@@ -114,7 +114,7 @@ getDoneTasks username recentDelta = do
   curTime <- getTimeInt
   conn <- cPS
   ret <- withTransaction conn (\ conn -> do
-    quickQuery conn 
+    quickQuery conn
       -- grab things that _have_ been done
       "SELECT DISTINCT(task_name) FROM task_log WHERE username = ? AND \
       \did_time >= ?"
@@ -126,7 +126,7 @@ getLastDone :: String -> Int -> IO [(String, UTCTime)]
 getLastDone username n = do
   conn <- cPS
   ret <- withTransaction conn (\ conn -> do
-    quickQuery conn 
+    quickQuery conn
       "SELECT task_name, did_time FROM task_log WHERE username = ? ORDER BY did_time DESC LIMIT ?"
       [toSql username, toSql n]
     )
@@ -175,15 +175,15 @@ type RcType = Map.Map String (Map.Map String (Maybe String))
 
 parseRc :: [String] -> RcType
 parseRc ls = snd $ foldr parseLine (Nothing, Map.empty) $ reverse ls where
-  parseLine :: String -> (Maybe String, RcType) -> 
+  parseLine :: String -> (Maybe String, RcType) ->
     (Maybe String, RcType)
   parseLine ('#':_) r = r
   parseLine "" r = r
-  parseLine l@(l_s:l_r) (t, rc) = 
+  parseLine l@(l_s:l_r) (t, rc) =
     let (l_m, [l_e]) = splitAt (length l_r - 1) l_r in
     if l_s == '<' && l_e == '>'
       then (Just l_m, rc)
-      else (t, Map.insertWith Map.union (fromJust t) 
+      else (t, Map.insertWith Map.union (fromJust t)
         (Map.singleton name mbyDesc) rc) where
           (name, mbyDesc) = l `subLBreakOrL` " - "
 
@@ -212,7 +212,7 @@ showRecent :: Options -> IO ()
 showRecent opts = do
   dones <- getLastDone (optUsername opts) (optListRecent opts)
   tz <- getCurrentTimeZone
-  putStr . unlines $ map (\ (task, time) -> 
+  putStr . unlines $ map (\ (task, time) ->
     show (utcToLocalTime tz time) ++ "\t" ++ task) dones
 
 rrrcTaskTree = do
@@ -255,31 +255,24 @@ showTasks opts = do
     then do
       let (_, headers, itemss, timess) = unzip4 intvlsHeadersItemssTimess
       putStrLn $ interlines $
-        zipWith3 (\ h is ds -> interlines $ [h] ++ 
+        zipWith3 (\ h is ds -> interlines $ [h] ++
           (zipWith (\ a b -> a ++ "  " ++ b) is $
             map (toDayDiffStr nowTime) ds))
         headers (spaceBlocks $ map (map ("- " ++)) itemss) timess
     else do
       let
-        intvlsItemsTimes = concat $ map 
+        intvlsItemsTimes = concat $ map
           (\ (iv, _, is, ts) -> map (\ (i, t) -> (iv, i, t)) $ zip is ts)
           intvlsHeadersItemssTimess
-        pctsItems = map (\ (iv, i, t) -> 
-          (liftM2 divF (liftM2 (-) (Just nowTime) t) (Just iv), i)) 
+        pctsItems = map (\ (iv, i, t) ->
+          (liftM2 divF (liftM2 (-) (Just nowTime) t) (Just iv), i))
           intvlsItemsTimes
-        pctsItemsOrd = sortBy (\ (x, _) (y, _) -> 
+        pctsItemsOrd = sortBy (\ (x, _) (y, _) ->
           mbyCompare (flip compare) x y) pctsItems
         (pcts, items) = unzip pctsItemsOrd
         pctsS = map showMN pcts
         ls = zipWith (\ x y -> x ++ "  " ++ y) (spaceBlock pctsS) items
       putStrLn $ interlines ls
-
-globsOrNot :: [String] -> IO [String]
-globsOrNot = fmap concat . mapM (\ arg -> do
-  gs <- HSH.glob arg
-  return $ case gs of
-    [] -> [arg]
-    gs -> gs)
 
 doErrs :: [[Char]] -> b
 doErrs errs = let
@@ -308,7 +301,7 @@ doTask opts task = if optKillLast opts
         recordTask (optUsername opts) taskFull (optActuallyDid opts)
           (optComment opts)
       [] -> doErrs ["task is not in your ~/.rrrc: " ++ task ++ "\n"]
-      taskDescs -> doErrs ["task prefix is ambiguous: " ++ task ++ ": " ++ 
+      taskDescs -> doErrs ["task prefix is ambiguous: " ++ task ++ ": " ++
         intercalate " " (map fst taskDescs) ++ "\n"]
 
 main :: IO ()
