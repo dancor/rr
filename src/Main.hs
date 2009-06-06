@@ -290,7 +290,7 @@ doTask opts task = if optKillLast opts
   else do
     rc <- rrrcTasks
     case lookupPrefix task rc of
-      [(taskFull, desc)] -> (if optRun opts
+      [(taskFull, desc)] -> (if optRun opts && optActuallyDid opts
         then case breakOnSubl "- " $ fromMaybe "" desc of
           Just (_, cmd) ->
             let c:a = breaks (== ' ') cmd in do
