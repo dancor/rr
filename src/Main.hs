@@ -17,10 +17,10 @@ import System.Console.GetOpt
 import System.Directory
 import System.Environment
 import System.IO
+import System.Process
 import Text.Printf
 import qualified Data.Map as Map
 import qualified Data.Set as Set
-import qualified HSH
 
 data Options = Options {
   optKillLast :: Bool,
@@ -215,6 +215,7 @@ showRecent opts = do
   putStr . unlines $ map (\ (task, time) ->
     show (utcToLocalTime tz time) ++ "\t" ++ task) dones
 
+rrrcTaskTree :: IO [([Char], (Integer, Map.Map String (Maybe String)))]
 rrrcTaskTree = do
   homeDir <- getHomeDirectory
   c <- readFile (homeDir ++ "/" ++ rcName)
@@ -227,6 +228,7 @@ rrrcTaskTree = do
   return . Map.toList .
     Map.mapWithKey (\ h v -> (freqHeaderToSecs h, v)) . parseRc $ lines c
 
+rrrcTasks :: IO (Map.Map String (Maybe String))
 rrrcTasks = do
   rc <- rrrcTaskTree
   return . Map.unions $ map (\ (_, (_, allTasksMap)) -> allTasksMap) rc
@@ -279,7 +281,7 @@ doErrs errs = let
   usage = "usage: rr [options] [task]"
   in error $ concat errs ++ usageInfo usage options
 
---lookupPrefix :: k -> Map.Map k v -> [v]
+lookupPrefix :: (Ord a1) => [a1] -> Map.Map [a1] a -> [([a1], a)]
 lookupPrefix k m = case Map.lookup k m of
   Just v -> [(k, v)]
   Nothing -> filter ((k `isPrefixOf`) . fst) $ Map.assocs m
@@ -295,7 +297,10 @@ doTask opts task = if optKillLast opts
           Just (_, cmd) ->
             let c:a = breaks (== ' ') cmd in do
               gs <- globsOrNot a
-              HSH.runIO (c, gs)
+              -- note that ^C will not kill the child process ugh
+              pId <- runProcess c gs Nothing Nothing Nothing Nothing Nothing
+              waitForProcess pId
+              return ()
           Nothing -> return ()
         else return ()) >>
         recordTask (optUsername opts) taskFull (optActuallyDid opts)
