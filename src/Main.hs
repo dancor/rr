@@ -3,6 +3,7 @@
 
 module Main where
 
+import Control.Applicative
 import Control.Exception
 import Control.Monad
 import Data.List
@@ -30,7 +31,8 @@ data Options = Options {
   optUsername :: String,
   optRun :: Bool,
   optGroupView :: Bool,
-  optIntvlFracToShow :: Rational
+  optIntvlFracToShow :: Rational,
+  optHoursAgo :: Rational
   }
 
 defaultOptions :: Options
@@ -42,7 +44,8 @@ defaultOptions = Options {
   optUsername = "",
   optRun = True,
   optGroupView = False,
-  optIntvlFracToShow = 0.5
+  optIntvlFracToShow = 0.5,
+  optHoursAgo = 0
   }
 
 options :: [OptDescr (Options -> Options)]
@@ -67,9 +70,13 @@ options = [
     "show group view of task list",
   Option "f" ["intvl-frac-to-show"]
     (ReqArg (\ f o -> o {optIntvlFracToShow = readDecRat f}) "FRAC")
-    "show tasks undone in the past f * do-interval (default 0.5)"
+    "show tasks undone in the past f * do-interval (default 0.5)",
+  Option "a" ["hours-ago"]
+    (ReqArg (\ h o -> o {optHoursAgo = readDecRat h}) "N")
+    "mark a task as done N hours ago"
   ]
 
+-- why not just (read) for this?
 readDecRat :: String -> Rational
 readDecRat s = case breakMb (== '.') s of
   Just (i, r) -> let rInt = read r
@@ -82,16 +89,16 @@ cPS = handleSqlError $ connectPostgreSQL "dbname=me_log"
 getTimeInt :: IO Integer
 getTimeInt = fmap floor getPOSIXTime
 
-recordTask :: String -> String -> Bool -> String -> IO ()
-recordTask username taskName actuallyDid comment = do
-  didTime <- getTimeInt
+recordTask :: Options -> String -> IO ()
+recordTask opts taskName = do
+  didTime <- (subtract . round $ optHoursAgo opts * 3600) <$> getTimeInt
   conn <- cPS
-  ret <- withTransaction conn (\ conn -> do
-    run conn
+  ret <- withTransaction conn (\ c -> do
+    run c
       "INSERT INTO task_log (task_name, username, actually_did, comment, \
       \did_time) VALUES (?, ?, ?, ?, ?)"
-      [toSql taskName, toSql username, toSql actuallyDid,
-      toSql comment, toSql didTime]
+      [toSql taskName, toSql $ optUsername opts, toSql $ optActuallyDid opts,
+      toSql $ optComment opts, toSql didTime]
     )
   disconnect conn
 
@@ -303,8 +310,7 @@ doTask opts task = if optKillLast opts
               return ()
           Nothing -> return ()
         else return ()) >>
-        recordTask (optUsername opts) taskFull (optActuallyDid opts)
-          (optComment opts)
+        recordTask opts taskFull
       [] -> doErrs ["task is not in your ~/.rrrc: " ++ task ++ "\n"]
       taskDescs -> doErrs ["task prefix is ambiguous: " ++ task ++ ": " ++
         intercalate " " (map fst taskDescs) ++ "\n"]
