@@ -6,7 +6,7 @@ author:         Daniel Corson
 synopsis:       repetative-task reminders
 build-type:     Simple
 build-depends:  FUtil, HDBC, HDBC-postgresql, base, containers, directory,
-                process, time
+                process, stm, sigint-kill-children, time, unix
 
 executable:     rr
 main-is:        Main.hs
