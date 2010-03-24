@@ -18,7 +18,6 @@ import System.Console.GetOpt
 import System.Directory
 import System.Environment
 import System.IO
-import System.Posix.KillChildren
 import System.Process
 import Text.Printf
 import qualified Data.Map as Map
@@ -293,23 +292,17 @@ lookupPrefix k m = case Map.lookup k m of
   Just v -> [(k, v)]
   Nothing -> filter ((k `isPrefixOf`) . fst) $ Map.assocs m
 
-doTask :: KillChildrenSt -> Options -> String -> IO ()
-doTask kSt opts task = if optKillLast opts
+doTask :: Options -> String -> IO ()
+doTask opts task = if optKillLast opts
   then unrecordTask (optUsername opts) task
   else do
     rc <- rrrcTasks
     case lookupPrefix task rc of
-      [(taskFull, desc)] -> (if optRun opts && optActuallyDid opts
-        then case breakOnSubl "- " $ fromMaybe "" desc of
-          Just (_, cmd) ->
-            let c:a = breaks (== ' ') cmd in do
-              gs <- globsOrNot a
-              pId <- runProcess c gs Nothing Nothing Nothing Nothing Nothing
-              pIdK <- killInsChild kSt pId
-              waitForProcess pId
-              killDelChild kSt pIdK
-          Nothing -> return ()
-        else return ()) >>
+      [(taskFull, desc)] -> do
+        when (optRun opts && optActuallyDid opts) $
+          case breakOnSubl "- " $ fromMaybe "" desc of
+            Just (_, cmd) -> system cmd >> return ()
+            Nothing -> return ()
         recordTask opts taskFull
       [] -> doErrs ["task is not in your ~/.rrrc: " ++ task ++ "\n"]
       taskDescs -> doErrs ["task prefix is ambiguous: " ++ task ++ ": " ++
@@ -317,7 +310,6 @@ doTask kSt opts task = if optKillLast opts
 
 main :: IO ()
 main = do
-  kSt <- initKillChildren
   args <- getArgs
   let
     (optsPre, tasks, errs) = getOpt Permute options args
@@ -325,4 +317,4 @@ main = do
   unless (null errs) $ doErrs errs
   if null tasks
     then if optListRecent opts > 0 then showRecent opts else showTasks opts
-    else mapM_ (doTask kSt opts) tasks >> showTasks opts
+    else mapM_ (doTask opts) tasks >> showTasks opts
