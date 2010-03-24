@@ -324,6 +324,17 @@ main = do
     (optsPre, tasks, errs) = getOpt Permute options args
     opts = foldl (flip id) defaultOptions optsPre
   unless (null errs) $ doErrs errs
-  if null tasks
-    then if optListRecent opts > 0 then showRecent opts else showTasks opts
-    else mapM_ (doTask opts) tasks >> showTasks opts
+  case tasks of
+    [] -> case optFwdServ opts of
+      Nothing ->
+        if optListRecent opts > 0 then showRecent opts else showTasks opts
+      Just host -> do
+        let
+          killServ [] = []
+          killServ ("-s":_:l) = killServ l
+          killServ l@("--":_) = l
+          killServ (x:l) = x:killServ l
+        waitForProcess =<< runProcess "ssh" ([host, "rr"] ++ killServ args)
+          Nothing Nothing Nothing Nothing Nothing
+        return ()
+    _ -> mapM_ (doTask opts) tasks >> showTasks opts
