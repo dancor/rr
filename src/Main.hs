@@ -33,7 +33,8 @@ data Options = Options {
   optGroupView :: Bool,
   optIntvlFracToShow :: Rational,
   optHoursAgo :: Rational,
-  optFwdServ :: Maybe String}
+  optFwdServ :: Maybe String,
+  optQuiet :: Bool}
 
 defaultOptions :: Options
 defaultOptions = Options {
@@ -46,7 +47,8 @@ defaultOptions = Options {
   optGroupView = False,
   optIntvlFracToShow = 0.5,
   optHoursAgo = 0,
-  optFwdServ = Nothing}
+  optFwdServ = Nothing,
+  optQuiet = False}
 
 options :: [OptDescr (Options -> Options)]
 options = [
@@ -76,8 +78,10 @@ options = [
     "mark a task as done N hours ago",
   Option "s" ["forward-server"]
     (ReqArg (\ a o -> o {optFwdServ = Just a}) "HOST")
-    "forward the rr register (i.e., after command, do: ssh HOST rr TASK)"
-  ]
+    "forward the rr register (i.e., after command, do: ssh -t HOST rr TASK)",
+  Option "q" ["quiet"]
+    (NoArg (\ o -> o {optQuiet = True}))
+    "just perform and mark tasks; do not display task list"]
 
 -- why not just (read) for this?
 readDecRat :: String -> Rational
@@ -243,7 +247,7 @@ rrrcTasks = do
   return . Map.unions $ map (\ (_, (_, allTasksMap)) -> allTasksMap) rc
 
 showTasks :: Options -> IO ()
-showTasks opts = do
+showTasks opts = if optQuiet opts then return () else do
   nowTime <- getTimeInt
   homeDir <- getHomeDirectory
   c <- openFile (homeDir ++ "/" ++ rcName) ReadMode >>= hGetContents
@@ -309,7 +313,8 @@ doTask opts task = if optKillLast opts
         recordTask opts taskFull
         case optFwdServ opts of
           Just host -> do
-            waitForProcess =<< runProcess "ssh" [host, "rr", taskFull]
+            waitForProcess =<<
+              runProcess "ssh" ["-t", host, "rr", "-q", taskFull]
               Nothing Nothing Nothing Nothing Nothing
             return ()
           Nothing -> return ()
@@ -334,7 +339,13 @@ main = do
           killServ ("-s":_:l) = killServ l
           killServ l@("--":_) = l
           killServ (x:l) = x:killServ l
-        waitForProcess =<< runProcess "ssh" ([host, "rr"] ++ killServ args)
+        waitForProcess =<<
+          runProcess "ssh" (["-t", host, "rr"] ++ killServ args)
           Nothing Nothing Nothing Nothing Nothing
         return ()
-    _ -> mapM_ (doTask opts) tasks >> showTasks opts
+    _ -> mapM_ (doTask opts) tasks >> case optFwdServ opts of
+      Nothing -> showTasks opts
+      Just host -> do
+        waitForProcess =<< runProcess "ssh" ["-t", host, "rr"]
+          Nothing Nothing Nothing Nothing Nothing
+        return ()
