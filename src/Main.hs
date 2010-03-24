@@ -32,8 +32,8 @@ data Options = Options {
   optRun :: Bool,
   optGroupView :: Bool,
   optIntvlFracToShow :: Rational,
-  optHoursAgo :: Rational
-  }
+  optHoursAgo :: Rational,
+  optFwdServ :: Maybe String}
 
 defaultOptions :: Options
 defaultOptions = Options {
@@ -45,8 +45,8 @@ defaultOptions = Options {
   optRun = True,
   optGroupView = False,
   optIntvlFracToShow = 0.5,
-  optHoursAgo = 0
-  }
+  optHoursAgo = 0,
+  optFwdServ = Nothing}
 
 options :: [OptDescr (Options -> Options)]
 options = [
@@ -73,7 +73,10 @@ options = [
     "show tasks undone in the past f * do-interval (default 0.5)",
   Option "a" ["hours-ago"]
     (ReqArg (\ h o -> o {optHoursAgo = readDecRat h}) "N")
-    "mark a task as done N hours ago"
+    "mark a task as done N hours ago",
+  Option "s" ["forward-server"]
+    (ReqArg (\ a o -> o {optFwdServ = Just a}) "HOST")
+    "forward the rr register (i.e., after command, do: ssh HOST rr TASK)"
   ]
 
 -- why not just (read) for this?
@@ -304,6 +307,12 @@ doTask opts task = if optKillLast opts
             Just (_, cmd) -> system cmd >> return ()
             Nothing -> return ()
         recordTask opts taskFull
+        case optFwdServ opts of
+          Just host -> do
+            waitForProcess =<< runProcess "ssh" [host, "rr", taskFull]
+              Nothing Nothing Nothing Nothing Nothing
+            return ()
+          Nothing -> return ()
       [] -> doErrs ["task is not in your ~/.rrrc: " ++ task ++ "\n"]
       taskDescs -> doErrs ["task prefix is ambiguous: " ++ task ++ ": " ++
         intercalate " " (map fst taskDescs) ++ "\n"]
