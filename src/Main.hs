@@ -53,7 +53,7 @@ defaultOptions = Options {
 options :: [OptDescr (Options -> Options)]
 options = [
   Option "l" ["list-recent"]
-    (OptArg (\ n o -> o {optListRecent = read $ fromMaybe "5" n}) "N")
+    (OptArg (\ n o -> o {optListRecent = maybe 5 read n}) "N")
     "list last N (default 5) records",
   Option "k" ["kill-last"]
     (NoArg (\ o -> o {optKillLast = True}))
