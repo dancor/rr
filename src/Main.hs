@@ -315,13 +315,16 @@ doTask opts task = if optKillLast opts
           Just host -> do
             waitForProcess =<<
               runProcess "ssh" ["-t", host, "rr", "-q", taskFull, "-a",
-                show $ optHoursAgo opts]
+                show . realToDouble $ optHoursAgo opts]
               Nothing Nothing Nothing Nothing Nothing
             return ()
           Nothing -> return ()
       [] -> doErrs ["task is not in your ~/.rrrc: " ++ task ++ "\n"]
       taskDescs -> doErrs ["task prefix is ambiguous: " ++ task ++ ": " ++
         intercalate " " (map fst taskDescs) ++ "\n"]
+
+realToDouble :: (Real a) => a -> Double
+realToDouble = realToFrac
 
 main :: IO ()
 main = do
