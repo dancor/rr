@@ -314,8 +314,9 @@ doTask opts task = if optKillLast opts
         case optFwdServ opts of
           Just host -> do
             waitForProcess =<<
-              runProcess "ssh" ["-t", host, "rr", "-q", taskFull, "-a",
-                show . realToDouble $ optHoursAgo opts]
+              runProcess "ssh" (["-t", host, "rr", "-q", taskFull, "-a",
+                show . realToDouble $ optHoursAgo opts] ++
+                if optRun opts then [] else ["-m"])
               Nothing Nothing Nothing Nothing Nothing
             return ()
           Nothing -> return ()
