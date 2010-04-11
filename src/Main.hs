@@ -14,81 +14,16 @@ import Data.Time.Clock.POSIX
 import Database.HDBC
 import Database.HDBC.PostgreSQL
 import FUtil
-import System.Console.GetOpt
+import Opt (Opts)
 import System.Directory
 import System.Environment
+import System.FilePath
 import System.IO
 import System.Process
 import Text.Printf
 import qualified Data.Map as Map
 import qualified Data.Set as Set
-
-data Options = Options {
-  optKillLast :: Bool,
-  optListRecent :: Int,
-  optActuallyDid :: Bool,
-  optComment :: String,
-  optUsername :: String,
-  optRun :: Bool,
-  optGroupView :: Bool,
-  optIntvlFracToShow :: Rational,
-  optHoursAgo :: Rational,
-  optFwdServ :: Maybe String,
-  optQuiet :: Bool}
-
-defaultOptions :: Options
-defaultOptions = Options {
-  optKillLast = False,
-  optListRecent = 0,
-  optActuallyDid = True,
-  optComment = "",
-  optUsername = "",
-  optRun = True,
-  optGroupView = False,
-  optIntvlFracToShow = 0.5,
-  optHoursAgo = 0,
-  optFwdServ = Nothing,
-  optQuiet = False}
-
-options :: [OptDescr (Options -> Options)]
-options = [
-  Option "l" ["list-recent"]
-    (OptArg (\ n o -> o {optListRecent = maybe 5 read n}) "N")
-    "list last N (default 5) records",
-  Option "k" ["kill-last"]
-    (NoArg (\ o -> o {optKillLast = True}))
-    "kill last record for the task",
-  Option "n" ["did-not-do"]
-    (NoArg (\ o -> o {optActuallyDid = False}))
-    "mark as not-actually-completed when silencing reminder",
-  Option "c" ["comment"]
-    (ReqArg (\ c o -> o {optComment = c}) "COMMENT")
-    "record comment along with silencing reminder",
-  Option "m" ["just-mark"]
-    (NoArg (\ o -> o {optRun = False}))
-    "if task is runnable, still just mark it instead of also running it",
-  Option "g" ["group-view"]
-    (NoArg (\ o -> o {optGroupView = True}))
-    "show group view of task list",
-  Option "f" ["intvl-frac-to-show"]
-    (ReqArg (\ f o -> o {optIntvlFracToShow = readDecRat f}) "FRAC")
-    "show tasks undone in the past f * do-interval (default 0.5)",
-  Option "a" ["hours-ago"]
-    (ReqArg (\ h o -> o {optHoursAgo = readDecRat h}) "N")
-    "mark a task as done N hours ago",
-  Option "s" ["forward-server"]
-    (ReqArg (\ a o -> o {optFwdServ = Just a}) "HOST")
-    "forward the rr register (i.e., after command, do: ssh -t HOST rr TASK)",
-  Option "q" ["quiet"]
-    (NoArg (\ o -> o {optQuiet = True}))
-    "just perform and mark tasks; do not display task list"]
-
--- why not just (read) for this?
-readDecRat :: String -> Rational
-readDecRat s = case breakMb (== '.') s of
-  Just (i, r) -> let rInt = read r
-    in fromIntegral (read i) + rInt % 10 ^ length (show rInt)
-  Nothing -> fromIntegral $ read s
+import qualified Opt
 
 cPS :: IO Connection
 cPS = handleSqlError $ connectPostgreSQL "dbname=me_log"
@@ -96,16 +31,17 @@ cPS = handleSqlError $ connectPostgreSQL "dbname=me_log"
 getTimeInt :: IO Integer
 getTimeInt = fmap floor getPOSIXTime
 
-recordTask :: Options -> String -> IO ()
+recordTask :: Opts -> String -> IO ()
 recordTask opts taskName = do
-  didTime <- (subtract . round $ optHoursAgo opts * 3600) <$> getTimeInt
+  didTime <- (subtract . round $ Opt.hoursAgo opts * 3600) <$> getTimeInt
   conn <- cPS
   ret <- withTransaction conn (\ c -> do
     run c
       "INSERT INTO task_log (task_name, username, actually_did, comment, \
       \did_time) VALUES (?, ?, ?, ?, ?)"
-      [toSql taskName, toSql $ optUsername opts, toSql $ optActuallyDid opts,
-      toSql $ optComment opts, toSql didTime]
+      [toSql taskName, toSql $ Opt.username opts,
+      toSql . not $ Opt.didNotDo opts,
+      toSql $ Opt.comment opts, toSql didTime]
     )
   disconnect conn
 
@@ -159,8 +95,11 @@ getTaskRecentTime username taskName = do
 
 type IntvlInfo = Map.Map String Int
 
-rcName :: [Char]
-rcName = ".rrrc"
+progDir :: FilePath
+progDir = ".rr"
+
+rcName :: FilePath
+rcName = "rc"
 
 dayTime :: Integer
 dayTime = 24 * 60 * 60
@@ -221,9 +160,9 @@ showMN :: (Text.Printf.PrintfArg t) => Maybe t -> [Char]
 showMN Nothing = "!"
 showMN (Just p) = printf "%.1f" p
 
-showRecent :: Options -> IO ()
+showRecent :: Opts -> IO ()
 showRecent opts = do
-  dones <- getLastDone (optUsername opts) (optListRecent opts)
+  dones <- getLastDone (Opt.username opts) (Opt.listRecent opts)
   tz <- getCurrentTimeZone
   putStr . unlines $ map (\ (task, time) ->
     show (utcToLocalTime tz time) ++ "\t" ++ task) dones
@@ -231,7 +170,7 @@ showRecent opts = do
 rrrcTaskTree :: IO [([Char], (Integer, Map.Map String (Maybe String)))]
 rrrcTaskTree = do
   homeDir <- getHomeDirectory
-  c <- readFile (homeDir ++ "/" ++ rcName)
+  c <- readFile (homeDir </> progDir </> rcName)
   let
     freqHeaderToSecs h = let
       (timesPerStr, intvlStr) = break (== '/') h
@@ -246,15 +185,15 @@ rrrcTasks = do
   rc <- rrrcTaskTree
   return . Map.unions $ map (\ (_, (_, allTasksMap)) -> allTasksMap) rc
 
-showTasks :: Options -> IO ()
-showTasks opts = if optQuiet opts then return () else do
+showTasks :: Opts -> IO ()
+showTasks opts = if Opt.quiet opts then return () else do
   nowTime <- getTimeInt
   homeDir <- getHomeDirectory
-  c <- openFile (homeDir ++ "/" ++ rcName) ReadMode >>= hGetContents
+  c <- openFile (homeDir </> progDir </> rcName) ReadMode >>= hGetContents
   rc <- rrrcTaskTree
   intvlsHeadersItemssTimess <- mapM (\ (adverb, (intvl, allTasksMap)) -> do
-    t <- getDoneTasks (optUsername opts) . floor $
-      optIntvlFracToShow opts * fromIntegral intvl
+    t <- getDoneTasks (Opt.username opts) . floor $
+      Opt.intvlFracToShow opts * fromIntegral intvl
     let
       tasks = Map.toList . foldr Map.delete allTasksMap $ Set.toList t
       (taskNames, _) = unzip tasks
@@ -263,10 +202,10 @@ showTasks opts = if optQuiet opts then return () else do
             Just desc -> " - " ++ desc
           )
         ) tasks
-    times <- mapM (getTaskRecentTime (optUsername opts)) taskNames
+    times <- mapM (getTaskRecentTime $ Opt.username opts) taskNames
     return (intvl, adverb ++ " tasks:", taskLines, times)
     ) rc
-  if optGroupView opts
+  if Opt.groupView opts
     then do
       let (_, headers, itemss, timess) = unzip4 intvlsHeadersItemssTimess
       putStrLn $ interlines $
@@ -289,34 +228,29 @@ showTasks opts = if optQuiet opts then return () else do
         ls = zipWith (\ x y -> x ++ "  " ++ y) (spaceBlock pctsS) items
       putStrLn $ interlines ls
 
-doErrs :: [[Char]] -> b
-doErrs errs = let
-  usage = "usage: rr [options] [task]"
-  in error $ concat errs ++ usageInfo usage options
-
 lookupPrefix :: (Ord a1) => [a1] -> Map.Map [a1] a -> [([a1], a)]
 lookupPrefix k m = case Map.lookup k m of
   Just v -> [(k, v)]
   Nothing -> filter ((k `isPrefixOf`) . fst) $ Map.assocs m
 
-doTask :: Options -> String -> IO ()
-doTask opts task = if optKillLast opts
-  then unrecordTask (optUsername opts) task
+doTask :: Opts -> String -> IO ()
+doTask opts task = if Opt.killLast opts
+  then unrecordTask (Opt.username opts) task
   else do
     rc <- rrrcTasks
     case lookupPrefix task rc of
       [(taskFull, desc)] -> do
-        when (optRun opts && optActuallyDid opts) $
+        when (Opt.run opts && not (Opt.didNotDo opts)) $
           case breakOnSubl "- " $ fromMaybe "" desc of
             Just (_, cmd) -> system cmd >> return ()
             Nothing -> return ()
         recordTask opts taskFull
-        case optFwdServ opts of
+        case Opt.fwdServ opts of
           Just host -> do
             waitForProcess =<<
               runProcess "ssh" (["-t", host, "rr", "-q", taskFull, "-a",
-                show . realToDouble $ optHoursAgo opts] ++
-                if optRun opts then [] else ["-m"])
+                show . realToDouble $ Opt.hoursAgo opts] ++
+                if Opt.run opts then [] else ["-m"])
               Nothing Nothing Nothing Nothing Nothing
             return ()
           Nothing -> return ()
@@ -327,17 +261,20 @@ doTask opts task = if optKillLast opts
 realToDouble :: (Real a) => a -> Double
 realToDouble = realToFrac
 
+usage = "usage: rr [options] [task]"
+
+doErrs :: [String] -> a
+doErrs errs = error $ concat errs ++ Opt.usageInfo usage
+
 main :: IO ()
 main = do
+  homeDir <- getHomeDirectory
+  (opts, tasks) <- Opt.getOpts (homeDir </> ".rr" </> "config") usage
   args <- getArgs
-  let
-    (optsPre, tasks, errs) = getOpt Permute options args
-    opts = foldl (flip id) defaultOptions optsPre
-  unless (null errs) $ doErrs errs
   case tasks of
-    [] -> case optFwdServ opts of
+    [] -> case Opt.fwdServ opts of
       Nothing ->
-        if optListRecent opts > 0 then showRecent opts else showTasks opts
+        if Opt.listRecent opts > 0 then showRecent opts else showTasks opts
       Just host -> do
         let
           killServ [] = []
@@ -348,7 +285,7 @@ main = do
           runProcess "ssh" (["-t", host, "rr"] ++ killServ args)
           Nothing Nothing Nothing Nothing Nothing
         return ()
-    _ -> mapM_ (doTask opts) tasks >> case optFwdServ opts of
+    _ -> mapM_ (doTask opts) tasks >> case Opt.fwdServ opts of
       Nothing -> showTasks opts
       Just host -> do
         waitForProcess =<< runProcess "ssh" ["-t", host, "rr"]
