@@ -261,10 +261,11 @@ doTask opts task = if Opt.killLast opts
 realToDouble :: (Real a) => a -> Double
 realToDouble = realToFrac
 
-usage = "usage: rr [options] [task]"
+usage :: String
+usage = "usage: rr [options] [task]\n" ++ Opt.optInfo
 
 doErrs :: [String] -> a
-doErrs errs = error $ concat errs ++ Opt.usageInfo usage
+doErrs errs = error $ concat errs ++ usage
 
 main :: IO ()
 main = do
