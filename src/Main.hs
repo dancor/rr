@@ -254,7 +254,7 @@ doTask opts task = if Opt.killLast opts
               Nothing Nothing Nothing Nothing Nothing
             return ()
           Nothing -> return ()
-      [] -> doErrs ["task is not in your ~/.rrrc: " ++ task ++ "\n"]
+      [] -> doErrs ["task is not in your ~/.rr/rc: " ++ task ++ "\n"]
       taskDescs -> doErrs ["task prefix is ambiguous: " ++ task ++ ": " ++
         intercalate " " (map fst taskDescs) ++ "\n"]
 
