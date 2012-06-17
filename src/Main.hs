@@ -133,6 +133,7 @@ parseRc ls = snd $ foldr parseLine (Nothing, Map.empty) $ reverse ls where
   parseLine :: String -> (Maybe String, RcType) ->
     (Maybe String, RcType)
   parseLine ('#':_) r = r
+  parseLine ('0':_) r = r
   parseLine "" r = r
   parseLine l@(l_s:l_r) (t, rc) =
     let (l_m, [l_e]) = splitAt (length l_r - 1) l_r in
@@ -140,7 +141,8 @@ parseRc ls = snd $ foldr parseLine (Nothing, Map.empty) $ reverse ls where
       then (Just l_m, rc)
       else (t, Map.insertWith Map.union (fromJust t)
         (Map.singleton name mbyDesc) rc) where
-          (name, mbyDesc) = l `subLBreakOrL` " - "
+          (_, Just l2) = l `subLBreakOrL` " - "
+          (name, mbyDesc) = l2 `subLBreakOrL` " - "
 
 toDayDiffStr :: Integer -> Maybe Integer -> [Char]
 toDayDiffStr nowTime Nothing = "never!"
