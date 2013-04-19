@@ -178,7 +178,9 @@ rrrcTaskTree = do
       (timesPerStr, intvlStr) = break (== '/') h
       (timesPer, intvlStr') =
         if null intvlStr then (1, h) else (read timesPerStr, tail intvlStr)
-      in (fromJust $ Map.lookup intvlStr' intvlInfos) `div` timesPer
+      in round $
+         fromIntegral (fromJust $ Map.lookup intvlStr' intvlInfos) /
+         timesPer
   return . Map.toList .
     Map.mapWithKey (\ h v -> (freqHeaderToSecs h, v)) . parseRc $ lines c
 
