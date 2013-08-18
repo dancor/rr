@@ -7,23 +7,24 @@ import Control.Applicative
 import Control.Exception
 import Control.Monad
 import Data.List
+import qualified Data.Map as Map
 import Data.Maybe
 import Data.Ratio
+import qualified Data.Set as Set
 import Data.Time
 import Data.Time.Clock.POSIX
 import Database.HDBC
 import Database.HDBC.PostgreSQL
-import FUtil
-import Opt (Opts)
 import System.Directory
 import System.Environment
 import System.FilePath
 import System.IO
 import System.Process
 import Text.Printf
-import qualified Data.Map as Map
-import qualified Data.Set as Set
+
+import Opt (Opts)
 import qualified Opt
+import Util
 
 cPS :: IO Connection
 cPS = handleSqlError $ connectPostgreSQL "dbname=me_log"
@@ -212,8 +213,8 @@ showTasks opts = if Opt.quiet opts then return () else do
   if Opt.groupView opts
     then do
       let (_, headers, itemss, timess) = unzip4 intvlsHeadersItemssTimess
-      putStrLn $ interlines $
-        zipWith3 (\ h is ds -> interlines $ [h] ++
+      putStrLn $ intercalate "\n" $
+        zipWith3 (\ h is ds -> intercalate "\n" $ [h] ++
           (zipWith (\ a b -> a ++ "  " ++ b) is $
             map (toDayDiffStr nowTime) ds))
         headers (spaceBlocks $ map (map ("- " ++)) itemss) timess
@@ -230,7 +231,7 @@ showTasks opts = if Opt.quiet opts then return () else do
         (pcts, items) = unzip pctsItemsOrd
         pctsS = map showMN pcts
         ls = zipWith (\ x y -> x ++ "  " ++ y) (spaceBlock pctsS) items
-      putStrLn $ interlines ls
+      putStrLn $ intercalate "\n" ls
 
 lookupPrefix :: (Ord a1) => [a1] -> Map.Map [a1] a -> [([a1], a)]
 lookupPrefix k m = case Map.lookup k m of
@@ -245,9 +246,9 @@ doTask opts task = if Opt.killLast opts
     case lookupPrefix task rc of
       [(taskFull, desc)] -> do
         when (Opt.run opts && not (Opt.didNotDo opts)) $
-          case breakOnSubl "- " $ fromMaybe "" desc of
-            Just (_, cmd) -> system cmd >> return ()
-            Nothing -> return ()
+          case desc of
+            Just ('-':' ':cmd) -> system cmd >> return ()
+            _ -> return ()
         recordTask opts taskFull
         case Opt.fwdServ opts of
           Just host -> do
